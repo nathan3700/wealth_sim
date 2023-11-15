@@ -29,7 +29,7 @@ class MyTestCase(unittest.TestCase):
         balance = self.fund.get_balance()
         self.assertEqual(balance, 1000)
         self.fund.advance_time(start_day + timedelta(weeks=4))
-        # todo self.assertEqual(2000, self.fund.get_balance())
+        self.assertEqual(2000, self.fund.get_balance())
 
 
 if __name__ == '__main__':
