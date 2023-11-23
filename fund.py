@@ -1,124 +1,57 @@
-from enum import Enum, auto
-from abc import ABC, abstractmethod
-from datetime import timedelta
-from datetime import date
-
-
-class Frequency(Enum):
-    MONTHLY = auto()
-    SEMIMONTHLY = auto()
-    BIWEEKLY = auto()
-    ONCE = auto()
-
-
-class BaseContributionSchedule(ABC):
-    def __init__(self, amount: float, reference_date: date):
-        """
-        :param amount: The amount that is regularly contributed
-        :param reference_date: The date that starts a periodic schedule (contributions don't start until subsequent \
-        periods AFTER this date)
-        """
-        self.amount = amount
-        self.last_contribution_date = reference_date
-
-    @abstractmethod
-    def contribute_until_date(self, date: date) -> float:
-        """
-        Advances last contribution date to last date of contribution before date
-        and returns the amount contributed in that time
-
-        :param date: Date to contribute until
-        :return: Amount contributed between the last contribution date and date
-        """
-        ...
-
-
-class MonthlyContributions(BaseContributionSchedule):
-    def contribute_until_date(self, next_date: date) -> float:
-        months = 12 * (next_date.year - self.last_contribution_date.year) + (
-                    next_date.month - self.last_contribution_date.month)
-        elapsed_contributions = months
-        if next_date.day < self.last_contribution_date.day:
-            elapsed_contributions -= 1  # Pay day not reached for last month
-
-        self.last_contribution_date = \
-            date(self.last_contribution_date.year + elapsed_contributions // 12,
-                 self.last_contribution_date.month + elapsed_contributions % 12,
-                 self.last_contribution_date.day)
-        return self.amount * elapsed_contributions
-
-
-class BiweeklyContributions(BaseContributionSchedule):
-    def contribute_until_date(self, next_date: date) -> float:
-        two_week_periods = ((next_date - self.last_contribution_date).days // 7) // 2
-        self.last_contribution_date += timedelta(days=two_week_periods * 14)
-        return self.amount * two_week_periods
-
-
-class SemiMonthlyContributions(BaseContributionSchedule):
-    """
-    Semi-Monthly schedule on the 1st and 15th of the month
-    """
-
-    def __init__(self, amount: float, reference_date: date):
-        super(SemiMonthlyContributions, self).__init__(amount, reference_date)
-        self.last_contribution_date = self.get_nearest_1st_or_15th(self.last_contribution_date)
-
-    def contribute_until_date(self, next_date: date) -> float:
-        next_date = self.get_nearest_1st_or_15th(next_date)
-
-        months = 12 * (next_date.year - self.last_contribution_date.year) + (
-                    next_date.month - self.last_contribution_date.month)
-        elapsed_contributions = 0
-        if months >= 0:
-            if months == 0:
-                if next_date > self.last_contribution_date:
-                    elapsed_contributions = 1
-                else:
-                    elapsed_contributions = 0
-            else:
-                if next_date.day > self.last_contribution_date.day:
-                    elapsed_contributions = months + 1
-                else:
-                    elapsed_contributions = months
-        if elapsed_contributions:
-            self.last_contribution_date = next_date
-        return self.amount * elapsed_contributions
-
-    @staticmethod
-    def get_nearest_1st_or_15th(next_date):
-        if next_date.day < 15:
-            nearest_1st_or_15th = date(next_date.year, next_date.month, 1)
-        else:
-            nearest_1st_or_15th = date(next_date.year, next_date.month, 15)
-        return nearest_1st_or_15th
+from contribution_schedule import *
 
 
 class Fund:
-    def __init__(self):
-        self.current_date = date.today()
+    def __init__(self, name="No Name Fund"):
+        self.contributions = 0.0
         self.balance = 0.0
-        self.contributions: list[BaseContributionSchedule] = []
+        self.apy = 0.0  # Annual Percentage Yield
+        self.daily_interest = 0.0
+        self.verbose = True
+        self.name = name
+        self.current_date = date.today()
+        self.contribution_schedule = NoneSchedule()
 
     def contribute(self, amount: float, reference_date: date = None, *, frequency: Frequency = Frequency.ONCE) -> None:
         if reference_date is None:
             reference_date = date.today()
-        self.current_date = date
+        self.current_date = reference_date
+        # ONCE is special, contribute *now*, not over time
+        # And this can be done at any time without replacing a periodic schedule
         if frequency == Frequency.ONCE:
             self.balance += amount
-        if frequency == Frequency.MONTHLY:
-            self.contributions.append(MonthlyContributions(amount, reference_date))
-        if frequency == Frequency.BIWEEKLY:
-            self.contributions.append(BiweeklyContributions(amount, reference_date))
+        # The remaining types will cause a change to the schedule
+        if self.contribution_schedule.frequency is not frequency:
+            self.print(
+                f"Fund {self.name}-contribution frequency is changing from {self.contribution_schedule.frequency} to {frequency}")
+        if frequency == Frequency.NONE:
+            self.contribution_schedule = NoneSchedule()
+        elif frequency == Frequency.MONTHLY:
+            self.contribution_schedule = MonthlySchedule(amount, reference_date)
+        elif frequency == Frequency.BIWEEKLY:
+            self.contribution_schedule = BiweeklySchedule(amount, reference_date)
+        elif frequency == Frequency.SEMIMONTHLY:
+            self.contribution_schedule = SemiMonthlySchedule(amount, reference_date)
+
+    def set_apy(self, apy):
+        self.apy = apy
+        self.daily_interest = (apy/100)/365
 
     def get_balance(self) -> float:
         return self.balance
 
     def advance_time(self, new_date: date = None):
         if new_date is None:
-            new_date = date.now()
-
-        for contribution in self.contributions:
-            self.balance += contribution.contribute_until_date(new_date)
+            new_date = date.today()
+        new_contributions = self.contribution_schedule.contribute_until_date(new_date)
+        self.contributions += new_contributions
+        self.balance += new_contributions
+        elapsed_days = (new_date - self.current_date).days
+        self.balance = self.balance * ((1 + self.daily_interest) ** elapsed_days)
 
         self.current_date = new_date
+
+    def print(self, info):
+        if self.verbose:
+            print(info)
+

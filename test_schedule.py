@@ -1,22 +1,16 @@
 import unittest
-from datetime import date, timedelta
-
+from contribution_schedule import *
 from typing import List
 
-import fund
-from fund import Frequency, Fund
 
-
-class MyTestCase(unittest.TestCase):
-    def setUp(self) -> None:
-        self.fund = Fund()
-
-    def test_can_instantiate_fund(self):
-        self.assertIsNotNone(self.fund)
-
+class TestContributionSchedule(unittest.TestCase):
+    def test_contribute_none_schedule(self):
+        co = NoneSchedule()
+        amount = co.contribute_until_date(date(1905, 2, 28))
+        self.assertEqual(0, amount)
 
     def test_contribution_schedules(self):
-        contribution_types: List[fund.BaseContributionSchedule]
+        contribution_types: List[BaseContributionSchedule]
         totals = [int(0)] * 3
         start_date = date(1900, 1, 4)
         last_contribution_dates = [start_date] * 3
@@ -25,9 +19,9 @@ class MyTestCase(unittest.TestCase):
             for i, c in enumerate(contribution_types):
                 totals[i] += c.contribute_until_date(next_date)
                 last_contribution_dates[i] = c.last_contribution_date
-        cm = fund.MonthlyContributions(1, start_date)
-        cbw = fund.BiweeklyContributions(1, start_date)
-        csm = fund.SemiMonthlyContributions(1, start_date)
+        cm = MonthlySchedule(1, start_date)
+        cbw = BiweeklySchedule(1, start_date)
+        csm = SemiMonthlySchedule(1, start_date)
         contribution_types = [cm, cbw, csm]
 
         self.assertEqual([start_date, start_date, date(1900, 1, 1)], [cm.last_contribution_date, cbw.last_contribution_date, csm.last_contribution_date])
@@ -54,30 +48,23 @@ class MyTestCase(unittest.TestCase):
         self.assertEqual([1, 2, 2], totals)
 
         advance_contributions_until(date(1901, 2, 4))  # 1 year later
-        self.assertEqual([date(1901, 2, 4),  date(1901, 2, 1), date(1901, 2, 1)], last_contribution_dates)
-        self.assertEqual([1 + 12, 2 + 52/2, 2 + 24], totals)
+        self.assertEqual([date(1901, 2, 4),  date(1901, 1, 31), date(1901, 2, 1)], last_contribution_dates)
+        self.assertEqual([1 + 12, 2 + 52//2, 2 + 24], totals)
 
+        # Move a few more days to get the next biweekly on Thursday 1901, 2, 7
+        advance_contributions_until(date(1901, 2, 14))
+        self.assertEqual([date(1901, 2, 4),  date(1901, 2, 14), date(1901, 2, 1)], last_contribution_dates)
+        self.assertEqual([1 + 12, 2 + 52/2 + 1, 2 + 24], totals)
 
-    def test_can_contribute_to_fund(self):
-        self.fund.contribute(10_000.00)
-        balance = self.fund.get_balance()
-        self.assertEqual(balance, 10_000)
+        # Advance to the same date and all should remain the same
+        advance_contributions_until(date(1901, 2, 14))
+        self.assertEqual([date(1901, 2, 4),  date(1901, 2, 14), date(1901, 2, 1)], last_contribution_dates)
+        self.assertEqual([1 + 12, 2 + 52/2 + 1, 2 + 24], totals)
 
-    def test_can_contribute_monthly(self):
-        start_day = date(2023, 10, 1)
-        self.fund.contribute(1000, reference_date=start_day, frequency=Frequency.MONTHLY)
-        self.fund.advance_time(date(2023, 12, 1))
-        balance = self.fund.get_balance()
-        self.assertEqual(balance, 2000)
-
-    def test_can_contribute_biweekly(self):
-        start_day = date(2023, 10, 1)
-        self.fund.contribute(1000, reference_date=start_day, frequency=Frequency.BIWEEKLY)
-        self.fund.advance_time(start_day + timedelta(days=6, weeks=3))
-        balance = self.fund.get_balance()
-        self.assertEqual(balance, 1000)
-        self.fund.advance_time(start_day + timedelta(weeks=4))
-        self.assertEqual(2000, self.fund.get_balance())
+        # Go into the past and nothing should change
+        advance_contributions_until(date(1899, 1, 17))
+        self.assertEqual([date(1901, 2, 4),  date(1901, 2, 14), date(1901, 2, 1)], last_contribution_dates)
+        self.assertEqual([1 + 12, 2 + 52/2 + 1, 2 + 24], totals)
 
 
 if __name__ == '__main__':

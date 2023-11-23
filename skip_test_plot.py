@@ -1,7 +1,5 @@
 import unittest
 import matplotlib.pyplot as plt
-import time
-import threading
 
 
 class MyTestCase(unittest.TestCase):
