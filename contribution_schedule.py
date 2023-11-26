@@ -4,6 +4,7 @@ from datetime import date
 from datetime import timedelta
 from typing import List, Tuple
 
+
 class Frequency(Enum):
     MONTHLY = auto()
     SEMIMONTHLY = auto()
@@ -13,6 +14,8 @@ class Frequency(Enum):
 
 
 class BaseContributionSchedule(ABC):
+    null_date = date(1, 1, 1)
+
     def __init__(self, amount: float, start_date: date):
         """
         :param amount: The amount that is regularly contributed
@@ -35,10 +38,22 @@ class BaseContributionSchedule(ABC):
         """
         ...
 
-    @abstractmethod
     def get_next_contribution_date(self) -> date:
         """
         :return: Returns the next date on which a contribution will occur
+        """
+        if (len(self.future_one_time_contributions)
+                and (self.future_one_time_contributions[0].__getitem__(0)
+                     < self.get_next_periodic_contribution_date() or (
+                             self.get_next_periodic_contribution_date() == self.null_date))):
+            return self.future_one_time_contributions[0].__getitem__(0)
+        else:
+            return self.get_next_periodic_contribution_date()
+
+    @abstractmethod
+    def get_next_periodic_contribution_date(self) -> date:
+        """
+        :return: Returns the next date on which a periodic contribution will occur
         """
         ...
 
@@ -61,16 +76,17 @@ class BaseContributionSchedule(ABC):
 
 class NoneSchedule(BaseContributionSchedule):
     def __init__(self):
-        super().__init__(0, date(1, 1, 1))
+        super().__init__(0, self.null_date)
         self.frequency = Frequency.NONE
-        self.last_contribution_date = date(1, 1, 1)
+        self.last_contribution_date = self.null_date
 
     def contribute_until_date(self, next_date: date) -> float:
         self.last_contribution_date = next_date
-        return self.amount
+        contributions = self.get_one_time_contributions_to_date(next_date)
+        return sum(contributions)
 
-    def get_next_contribution_date(self) -> date:
-        return date(1, 1, 1)
+    def get_next_periodic_contribution_date(self) -> date:
+        return self.null_date
 
 
 class MonthlySchedule(BaseContributionSchedule):
@@ -104,7 +120,7 @@ class MonthlySchedule(BaseContributionSchedule):
         next_date = date(next_year, next_month, self.contribution_day)
         return next_date
 
-    def get_next_contribution_date(self) -> date:
+    def get_next_periodic_contribution_date(self) -> date:
         return self.get_relative_contribution_date(1)
 
 
@@ -133,7 +149,7 @@ class BiweeklySchedule(BaseContributionSchedule):
     def get_relative_contribution_date(self, two_week_periods) -> date:
         return self.last_contribution_date + timedelta(days=two_week_periods * 14)
 
-    def get_next_contribution_date(self) -> date:
+    def get_next_periodic_contribution_date(self) -> date:
         return self.get_relative_contribution_date(1)
 
 
@@ -176,6 +192,6 @@ class SemiMonthlySchedule(BaseContributionSchedule):
             nearest_1st_or_15th = date(next_date.year, next_date.month, 15)
         return nearest_1st_or_15th
 
-    def get_next_contribution_date(self) -> date:
+    def get_next_periodic_contribution_date(self) -> date:
         # use a timedelta that ensures we wrap into the next month in case of a 31-day month
         return self.get_nearest_1st_or_15th(self.last_contribution_date + timedelta(days=20))
