@@ -23,7 +23,6 @@ class Fund:
         # There can only be one periodic schedule.  A new frequency will replace an old one.
         # ONCE is special in that it can be scheduled now without replacing a periodic schedule
         if frequency == Frequency.ONCE:
-            self.future_fixed_contributions.append((start_date, amount))
             self.contribution_schedule.add_one_time_contribution(amount, start_date)
         else:
             # The remaining types will cause a change to the schedule
@@ -40,14 +39,24 @@ class Fund:
                 self.contribution_schedule = SemiMonthlySchedule(amount, start_date)
 
     def advance_time(self, new_date: date):
-        new_contributions = self.contribution_schedule.contribute_until_date(new_date)
+        if new_date < self.current_date:
+            raise FundError(
+                f"advance_time is advancing to a date in the past.  Current Fund Date {self.current_date}, Next Date {new_date}")
+        while self.current_date < new_date:
+            next_contrib = self.contribution_schedule.get_next_contribution_date()
+            if self.current_date < next_contrib <= new_date:
+                self.advance_time_partial(next_contrib)
+            else:
+                self.advance_time_partial(new_date)
 
-        self.contributions += new_contributions
-        self.balance += new_contributions
+    def advance_time_partial(self, new_date: date):
+        # Apply growth first before new contributions
         elapsed_days = (new_date - self.current_date).days
-        if elapsed_days < 0:
-            raise FundError(f"advance_time is advancing to a date in the past.  Current Fund Date {self.current_date}, Next Date {new_date}")
-        self.balance = self.balance * ((1 + self.daily_rate) ** elapsed_days)
+        growth = self.balance * ((1 + self.daily_rate) ** elapsed_days) - self.balance
+
+        new_contributions = self.contribution_schedule.contribute_until_date(new_date)
+        self.contributions += new_contributions
+        self.balance += growth + new_contributions
         self.current_date = new_date
 
     def set_apy(self, apy):

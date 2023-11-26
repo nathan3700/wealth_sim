@@ -9,16 +9,6 @@ class TestContributionSchedule(unittest.TestCase):
         amount = co.contribute_until_date(date(1905, 2, 28))
         self.assertEqual(0, amount)
 
-    def test_one_time_contributions(self):
-        for schedule in [MonthlySchedule, SemiMonthlySchedule, BiweeklySchedule]:
-            s = schedule(0, date(1900, 1, 1))
-            s.add_one_time_contribution(33, date(1900, 1, 2))
-            total = 0.0
-            total += s.contribute_until_date(date(1900, 1, 1))
-            self.assertEqual(0, total, f"While testing {schedule.__name__}")
-            total += s.contribute_until_date(date(1900, 1, 2))
-            self.assertEqual(33, total, f"While testing {schedule.__name__}")
-
     def test_contributions_no_effect_until_next_date(self):
         for schedule in [MonthlySchedule, SemiMonthlySchedule, BiweeklySchedule]:
             s = schedule(1, date(1900, 1, 1))
@@ -43,6 +33,46 @@ class TestContributionSchedule(unittest.TestCase):
         for schedule in [MonthlySchedule, SemiMonthlySchedule, BiweeklySchedule]:
             s = schedule(1, date(1900, 1, 1))
             self.assertEqual(date(1900, 1, 1), s.get_next_contribution_date(), f"While testing {schedule.__name__}")
+
+    def test_one_time_contributions_across_types(self):
+        for schedule in [MonthlySchedule, SemiMonthlySchedule, BiweeklySchedule]:
+            s = schedule(0, date(1900, 1, 1))
+            s.add_one_time_contribution(33, date(1900, 1, 2))
+            total = 0.0
+            total += s.contribute_until_date(date(1900, 1, 1))
+            self.assertEqual(0, total, f"While testing {schedule.__name__}")
+            total += s.contribute_until_date(date(1900, 1, 2))
+            self.assertEqual(33, total, f"While testing {schedule.__name__}")
+
+    def test_one_contribution_ordering(self):
+        s = MonthlySchedule(1, date(1900, 1, 1))
+        s.add_one_time_contribution(20, date(1900, 2, 1))
+        s.add_one_time_contribution(30, date(1900, 2, 1))  # Add two on same date
+        s.add_one_time_contribution(10, date(1900, 1, 9))  # Add one "out of order"
+        total = s.contribute_until_date(date(1900, 1, 1))
+        self.assertEqual(1, total)
+        total += s.contribute_until_date(date(1900, 1, 9))
+        self.assertEqual(11, total)
+        total += s.contribute_until_date(date(1900, 2, 1))
+        self.assertEqual(62, total)
+
+    def test_get_next_contribution_date_with_one_times_added(self):
+        s = MonthlySchedule(1, date(1900, 1, 1))
+        s.add_one_time_contribution(10, date(1900, 1, 9))
+        s.add_one_time_contribution(20, date(1900, 2, 2))
+        self.assertEqual(date(1900, 1, 1), s.get_next_contribution_date())
+        total = s.contribute_until_date(date(1900, 1, 1))
+        self.assertEqual(1, total)
+        self.assertEqual(date(1900, 1, 9), s.get_next_contribution_date())
+        total += s.contribute_until_date(date(1900, 1, 9))
+        self.assertEqual(11, total)
+        self.assertEqual(date(1900, 2, 1), s.get_next_contribution_date())
+        total += s.contribute_until_date(date(1900, 2, 1))
+        self.assertEqual(12, total)
+        self.assertEqual(date(1900, 2, 2), s.get_next_contribution_date())
+        total += s.contribute_until_date(date(1900, 2, 2))
+        self.assertEqual(32, total)
+        self.assertEqual(date(1900, 3, 1), s.get_next_contribution_date())
 
     def test_monthly_schedule(self):
         total = int(0)

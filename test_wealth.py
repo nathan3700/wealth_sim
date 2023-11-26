@@ -90,10 +90,8 @@ class TestFunds(unittest.TestCase):
     def test_apply_interest_only_after_contributions(self):
         self.fund.set_daily_rate(.01)
         self.fund.contribute(1.00, date(1978, 6, 1), frequency=Frequency.SEMIMONTHLY)
-        self.fund.advance_time(date(1978, 6, 14))
-        # Fixme: change this so contributions are applied in batches and interest is
-        # applied between those batches
-        # self.assertEqual(1 * (1.01 ** 14), self.fund.get_balance())  # Just 15 days of having a $1
+        self.fund.advance_time(date(1978, 6, 15))
+        self.assertEqual(1 * (1.01 ** 14) + 1, self.fund.get_balance())  # 14 days of growth on $1 and another $1
 
 
 if __name__ == '__main__':
