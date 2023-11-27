@@ -3,6 +3,7 @@ from abc import ABC, abstractmethod
 from datetime import date
 from datetime import timedelta
 from typing import List, Tuple
+from fund_transaction import FundTransaction, FundTransactionType
 
 
 class Frequency(Enum):
@@ -19,7 +20,7 @@ class BaseContributionSchedule(ABC):
     def __init__(self, amount: float, start_date: date):
         """
         :param amount: The amount that is regularly contributed
-        :param start_date: The date that starts a periodic schedule (contributions don't start until subsequent \
+        :param start_date: The date that starts a periodic schedule (history don't start until subsequent \
         periods AFTER this date)
         """
         self.frequency = Frequency.NONE
@@ -29,12 +30,12 @@ class BaseContributionSchedule(ABC):
         self.future_one_time_contributions: List[Tuple[date, float]] = []
 
     @abstractmethod
-    def contribute_until_date(self, next_date: date) -> float:
+    def get_contributions_until(self, next_date: date) -> List[FundTransaction]:
         """
         Advances last contribution date to last date of contribution before date
         and returns the amount contributed in that time
         :param next_date: Date to contribute until
-        :return: Amount contributed between the last contribution date and date
+        :return: Contributions between the last contribution date and date
         """
         ...
 
@@ -62,12 +63,12 @@ class BaseContributionSchedule(ABC):
         # Ensure the list is sorted by date oldest to newest
         self.future_one_time_contributions.sort(key=lambda item: item[0])
 
-    def get_one_time_contributions_to_date(self, next_date) -> List[float]:
-        contributions: List[float] = []
+    def get_one_time_contributions_to_date(self, next_date) -> List[FundTransaction]:
+        contributions: List[FundTransaction] = []
         keep: List[Tuple[date, float]] = []
         for d, a in self.future_one_time_contributions:
             if d <= next_date:
-                contributions.append(a)
+                contributions.append(FundTransaction(d, a, FundTransactionType.ONE_TIME))
             else:
                 keep.append((d, a))
         self.future_one_time_contributions = keep
@@ -80,10 +81,10 @@ class NoneSchedule(BaseContributionSchedule):
         self.frequency = Frequency.NONE
         self.last_contribution_date = self.null_date
 
-    def contribute_until_date(self, next_date: date) -> float:
+    def get_contributions_until(self, next_date: date) -> List[FundTransaction]:
         self.last_contribution_date = next_date
         contributions = self.get_one_time_contributions_to_date(next_date)
-        return sum(contributions)
+        return contributions
 
     def get_next_periodic_contribution_date(self) -> date:
         return self.null_date
@@ -97,21 +98,20 @@ class MonthlySchedule(BaseContributionSchedule):
         self.last_contribution_date = start_date
         self.last_contribution_date = self.get_relative_contribution_date(-1)  # Prime to get contribution on 1st day
 
-    def contribute_until_date(self, next_date: date) -> float:
+    def get_contributions_until(self, next_date: date) -> List[FundTransaction]:
+        contributions = []
         if next_date > self.last_contribution_date:
             months_elapsed = 12 * (next_date.year - self.last_contribution_date.year) + (
-                        next_date.month - self.last_contribution_date.month)
+                    next_date.month - self.last_contribution_date.month)
             if months_elapsed > 0 and next_date.day < self.contribution_day:
                 months_elapsed -= 1  # Pay day not reached for last month
 
             self.last_contribution_date = self.get_relative_contribution_date(months_elapsed)
-            contributions = []
-            for i in range(months_elapsed):
-                contributions.append(self.amount)
+
+            contributions += [FundTransaction(next_date, self.amount, FundTransactionType.PERIODIC, "Monthly") for i in
+                              range(months_elapsed)]
             contributions += self.get_one_time_contributions_to_date(next_date)
-            return sum(contributions)
-        else:
-            return 0.0
+        return contributions
 
     def get_relative_contribution_date(self, months_elapsed):
         year_rollover = (self.last_contribution_date.month - 1 + months_elapsed) // 12
@@ -132,19 +132,18 @@ class BiweeklySchedule(BaseContributionSchedule):
         self.last_contribution_date = self.get_relative_contribution_date(-1)
         self.frequency = Frequency.BIWEEKLY
 
-    def contribute_until_date(self, next_date: date) -> float:
+    def get_contributions_until(self, next_date: date) -> List[FundTransaction]:
+        contributions = []
         if next_date > self.last_contribution_date:
             two_week_periods = ((next_date - self.last_contribution_date).days // 7) // 2
             if two_week_periods < 0:
                 two_week_periods = 0
             self.last_contribution_date = self.get_relative_contribution_date(two_week_periods)
-            contributions = []
-            for i in range(two_week_periods):
-                contributions.append(self.amount)
+
+            contributions += [FundTransaction(next_date, self.amount, FundTransactionType.PERIODIC, "Biweekly") for i in
+                              range(two_week_periods)]
             contributions += self.get_one_time_contributions_to_date(next_date)
-            return sum(contributions)
-        else:
-            return 0.0
+        return contributions
 
     def get_relative_contribution_date(self, two_week_periods) -> date:
         return self.last_contribution_date + timedelta(days=two_week_periods * 14)
@@ -163,10 +162,9 @@ class SemiMonthlySchedule(BaseContributionSchedule):
         # Prime to get contribution on 1st day of start_date
         self.last_contribution_date = self.get_nearest_1st_or_15th(start_date - timedelta(days=1))
 
-    def contribute_until_date(self, next_date: date) -> float:
+    def get_contributions_until(self, next_date: date) -> List[FundTransaction]:
         contributions = []
-        contributions += self.get_one_time_contributions_to_date(next_date)
-
+        contributions += self.get_one_time_contributions_to_date(next_date)  # Handle these before changing next_date
         next_date = self.get_nearest_1st_or_15th(next_date)
         if next_date > self.last_contribution_date:
             months = 12 * (next_date.year - self.last_contribution_date.year) + (
@@ -180,9 +178,10 @@ class SemiMonthlySchedule(BaseContributionSchedule):
                     elapsed_contributions -= 1
             if elapsed_contributions:
                 self.last_contribution_date = next_date
-            for i in range(elapsed_contributions):
-                contributions.append(self.amount)
-        return sum(contributions)
+
+            contributions += [FundTransaction(next_date, self.amount, FundTransactionType.PERIODIC, "Semi-Monthly") for i in
+                              range(elapsed_contributions)]
+        return contributions
 
     @staticmethod
     def get_nearest_1st_or_15th(next_date):

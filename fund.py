@@ -7,7 +7,7 @@ class FundError(Exception):
 
 class Fund:
     def __init__(self,  inception_date: date, name="No Name Fund"):
-        self.contributions = 0.0
+        self.history: List[FundTransaction] = []
         self.balance = 0.0
         self.apy = 0.0  # Annual Percentage Yield
         self.daily_rate = 0.0
@@ -50,13 +50,15 @@ class Fund:
                 self.advance_time_partial(new_date)
 
     def advance_time_partial(self, new_date: date):
-        # Apply growth first before new contributions
+        new_contributions = self.contribution_schedule.get_contributions_until(new_date)
+        self.history += new_contributions
+
+        # Apply growth first before new history
         elapsed_days = (new_date - self.current_date).days
         growth = self.balance * ((1 + self.daily_rate) ** elapsed_days) - self.balance
+        self.history.append(FundTransaction(new_date, growth, FundTransactionType.GROWTH))
 
-        new_contributions = self.contribution_schedule.contribute_until_date(new_date)
-        self.contributions += new_contributions
-        self.balance += growth + new_contributions
+        self.balance += growth + self.add_up(new_contributions)
         self.current_date = new_date
 
     def set_apy(self, apy):
@@ -82,3 +84,7 @@ class Fund:
         if self.verbose:
             print(info)
 
+    @staticmethod
+    def add_up(contributions: List[FundTransaction]):
+        amounts = [c.amount for c in contributions]
+        return sum(amounts)

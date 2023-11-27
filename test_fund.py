@@ -46,7 +46,7 @@ class TestFunds(unittest.TestCase):
         self.assertIn("is changing", self.captured_out[0])
         self.fund.advance_time(date(2023, 2, 1))
         self.assertEqual(1002.46, self.fund.get_balance())
-        self.fund.contribute(0, date(2023, 2, 2), frequency=Frequency.NONE)  # turn off contributions
+        self.fund.contribute(0, date(2023, 2, 2), frequency=Frequency.NONE)  # turn off history
         self.fund.advance_time(date(2030, 12, 31))
         self.assertEqual(1002.46, self.fund.get_balance())  # No change
 
@@ -92,6 +92,10 @@ class TestFunds(unittest.TestCase):
         self.fund.contribute(1.00, date(1978, 6, 1), frequency=Frequency.SEMIMONTHLY)
         self.fund.advance_time(date(1978, 6, 15))
         self.assertEqual(1 * (1.01 ** 14) + 1, self.fund.get_balance())  # 14 days of growth on $1 and another $1
+        balance = self.fund.get_balance()
+        self.fund.advance_time(date(1978, 7, 15))
+        # Accrue interest 16 days until July 1st, add $1, accrue 14 more days, add $1
+        self.assertEqual((balance * (1.01 ** 16) + 1) * (1.01 ** 14) + 1, self.fund.get_balance())
 
 
 if __name__ == '__main__':
