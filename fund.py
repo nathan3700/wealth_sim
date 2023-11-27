@@ -8,15 +8,17 @@ class FundError(Exception):
 class Fund:
     def __init__(self,  inception_date: date, name="No Name Fund"):
         self.history: List[FundTransaction] = []
+        self.balance_history: List[FundTransaction] = []
         self.balance = 0.0
         self.apy = 0.0  # Annual Percentage Yield
         self.daily_rate = 0.0
         self.verbose = True
         self.name = name
+        self.inception_date = inception_date
         self.current_date = inception_date
         self.contribution_schedule = NoneSchedule()
 
-    def contribute(self, amount: float, start_date: date, *, frequency: Frequency = Frequency.ONCE) -> None:
+    def contribute(self, amount: float, start_date: date, frequency: Frequency = Frequency.ONCE) -> None:
         if start_date <= self.current_date:
             raise FundError("Contributions must be scheduled in the future.\n" +
                             f"Fund's current date is {self.current_date}, contribution date is {start_date}")
@@ -48,6 +50,7 @@ class Fund:
                 self.advance_time_partial(next_contrib)
             else:
                 self.advance_time_partial(new_date)
+        self.balance_history.append(FundTransaction(new_date, self.get_balance(), FundTransactionType.BALANCE))
 
     def advance_time_partial(self, new_date: date):
         new_contributions = self.contribution_schedule.get_contributions_until(new_date)
@@ -66,7 +69,9 @@ class Fund:
         simple_daily_rate = apy/(365 * 100)
         annual_rate_with_simple_daily_rate = (1 + apy/36500) ** 365 - 1
         # Make the daily rate a little lower so that when compounded daily it will still come out to APY
-        correction_factor = (apy/100) / annual_rate_with_simple_daily_rate
+        correction_factor = 1.0
+        if apy > 0:
+            correction_factor = (apy/100) / annual_rate_with_simple_daily_rate
         effective_daily_rate = simple_daily_rate * correction_factor
         self.daily_rate = effective_daily_rate
 

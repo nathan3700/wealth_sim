@@ -6,6 +6,7 @@ class FundTransactionType(Enum):
     PERIODIC = auto()
     ONE_TIME = auto()
     GROWTH = auto()
+    BALANCE = auto()
 
 
 class FundTransaction:
