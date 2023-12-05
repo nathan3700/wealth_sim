@@ -9,6 +9,7 @@ class Fund:
     def __init__(self,  inception_date: date, name="No Name Fund"):
         self.history: List[FundTransaction] = []
         self.balance_history: List[FundTransaction] = []
+        self.apy_history = []
         self.balance = 0.0
         self.apy = 0.0  # Annual Percentage Yield
         self.daily_rate = 0.0
@@ -51,6 +52,7 @@ class Fund:
             else:
                 self.advance_time_partial(new_date)
         self.balance_history.append(FundTransaction(new_date, self.get_balance(), FundTransactionType.BALANCE))
+        self.apy_history.append(self.apy)
 
     def advance_time_partial(self, new_date: date):
         new_contributions = self.contribution_schedule.get_contributions_until(new_date)
