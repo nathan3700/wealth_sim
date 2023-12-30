@@ -3,6 +3,7 @@ from datetime import date, timedelta
 from typing import List
 import fund
 from fund import Frequency, Fund
+from fund_transaction import FundTransactionType
 
 
 class TestFunds(unittest.TestCase):
@@ -87,6 +88,27 @@ class TestFunds(unittest.TestCase):
         elapsed_days = (date(2000, 1, 1) - date(1900, 1, 1)).days
         self.assertEqual((1000000 * (1 + self.fund.daily_rate) ** elapsed_days), self.fund.get_balance())
 
+    def test_one_day_lose_all(self):
+        self.fund.advance_time(date(2000, 1, 1))
+        self.fund.set_daily_rate(-1)
+        self.fund.balance = 100
+        self.fund.advance_time(date(2000, 1, 2))
+        self.assertEqual(0, self.fund.get_balance())
+
+    def test_negative_daily_rate(self):
+        self.fund.advance_time(date(2000, 1, 1))
+        self.fund.set_daily_rate(-0.01)
+        self.fund.balance = 100
+        self.fund.advance_time(date(2000, 1, 2))
+        self.assertEqual(99, self.fund.get_balance())
+
+    def test_lose_all_over_year(self):
+        self.fund.advance_time(date(2000, 1, 1))
+        self.fund.set_apy(-100)
+        self.fund.balance = 100
+        self.fund.advance_time(date(2001, 1, 1))
+        self.assertEqual(0, self.fund.get_balance())
+
     def test_apply_interest_only_after_contributions(self):
         self.fund.set_daily_rate(.01)
         self.fund.contribute(1.00, date(1978, 6, 1), frequency=Frequency.SEMIMONTHLY)
@@ -96,6 +118,21 @@ class TestFunds(unittest.TestCase):
         self.fund.advance_time(date(1978, 7, 15))
         # Accrue interest 16 days until July 1st, add $1, accrue 14 more days, add $1
         self.assertEqual((balance * (1.01 ** 16) + 1) * (1.01 ** 14) + 1, self.fund.get_balance())
+
+    def test_cannot_go_negative(self):
+        self.fund.set_apy(0)
+        self.fund.contribute(10000, date(1978, 1, 1), frequency=Frequency.ONCE)
+        self.fund.contribute(-30000, date(1978, 2, 1), frequency=Frequency.ONCE)
+        self.fund.advance_time(date(1978, 2, 1))
+        self.assertEqual(0, self.fund.get_balance())
+        insufficient_hist = [h for h in self.fund.history if h.type == FundTransactionType.INSUFFICIENT_FUNDS]
+        self.assertEqual(1, len(insufficient_hist))
+
+        self.fund.contribute(-1000, date(1978, 3, 1), frequency=Frequency.MONTHLY)
+        self.fund.advance_time(date(1979, 2, 1))
+        self.assertEqual(0, self.fund.get_balance())
+        insufficient_hist = [h for h in self.fund.history if h.type == FundTransactionType.INSUFFICIENT_FUNDS]
+        self.assertEqual(13, len(insufficient_hist))
 
 
 if __name__ == '__main__':

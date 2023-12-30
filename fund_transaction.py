@@ -3,6 +3,7 @@ from enum import Enum, auto
 
 
 class FundTransactionType(Enum):
+    INSUFFICIENT_FUNDS = auto()
     PERIODIC = auto()
     ONE_TIME = auto()
     GROWTH = auto()
@@ -14,5 +15,5 @@ class FundTransaction:
                  desc=""):
         self.date = txn_date
         self.amount = amount
-        self.type: txn_type
+        self.type = txn_type
         self.description = desc

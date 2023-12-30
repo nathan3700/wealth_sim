@@ -64,6 +64,10 @@ class Fund:
         self.history.append(FundTransaction(new_date, growth, FundTransactionType.GROWTH))
 
         self.balance += growth + self.add_up(new_contributions)
+        if self.balance < 0:
+            underflow = 0 - self.balance
+            self.balance = 0
+            self.history.append(FundTransaction(new_date, underflow, FundTransactionType.INSUFFICIENT_FUNDS))
         self.current_date = new_date
 
     def set_apy(self, apy):
@@ -72,7 +76,7 @@ class Fund:
         annual_rate_with_simple_daily_rate = (1 + apy/36500) ** 365 - 1
         # Make the daily rate a little lower so that when compounded daily it will still come out to APY
         correction_factor = 1.0
-        if apy > 0:
+        if annual_rate_with_simple_daily_rate != 0:
             correction_factor = (apy/100) / annual_rate_with_simple_daily_rate
         effective_daily_rate = simple_daily_rate * correction_factor
         self.daily_rate = effective_daily_rate
