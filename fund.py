@@ -1,3 +1,5 @@
+import math
+
 from contribution_schedule import *
 
 
@@ -64,26 +66,30 @@ class Fund:
         self.history.append(FundTransaction(new_date, growth, FundTransactionType.GROWTH))
 
         self.balance += growth + self.add_up(new_contributions)
+        self.balance = self.nearest_hundredth(self.balance)
         if self.balance < 0:
             underflow = 0 - self.balance
             self.balance = 0
             self.history.append(FundTransaction(new_date, underflow, FundTransactionType.INSUFFICIENT_FUNDS))
         self.current_date = new_date
 
+    @classmethod
+    def nearest_hundredth(cls, value):
+        return round(value * 100) / 100
+
     def set_apy(self, apy):
         self.apy = apy
-        simple_daily_rate = apy/(365 * 100)
-        annual_rate_with_simple_daily_rate = (1 + apy/36500) ** 365 - 1
-        # Make the daily rate a little lower so that when compounded daily it will still come out to APY
-        correction_factor = 1.0
-        if annual_rate_with_simple_daily_rate != 0:
-            correction_factor = (apy/100) / annual_rate_with_simple_daily_rate
-        effective_daily_rate = simple_daily_rate * correction_factor
-        self.daily_rate = effective_daily_rate
+        # This equation solves for daily rate based on a desired
+        # yearly yield assuming 365 days in the year
+        # When the input is -100% (a total loss),
+        # we must use an absolute value slightly less than 100 to prevent log(0)
+        if apy == -100:
+            apy = -99.9999
+        self.daily_rate = math.exp(math.log((apy/100)+1)/365) - 1
 
     def set_daily_rate(self, daily_rate):
         self.daily_rate = daily_rate
-        self.apy = (1 + daily_rate) ** 365 - 1
+        self.apy = self.nearest_hundredth((1 + daily_rate) ** 365 - 1) * 100
 
     def get_balance(self) -> float:
         return self.balance

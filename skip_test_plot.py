@@ -13,7 +13,10 @@ class MyTestCase(unittest.TestCase):
     def setUp(self) -> None:
         self.years_sp500, self.returns_sp500 = self.get_sp500_returns_from_csv()
         random.seed(27)
-        random.shuffle(self.returns_sp500)
+        use_historical_sp500 = False
+        if use_historical_sp500:
+            random.shuffle(self.returns_sp500)
+        default_apy = 4.5
         start_year = 2000
         retirement_year = 2030
         begin_withdrawal_year = 2035
@@ -21,11 +24,12 @@ class MyTestCase(unittest.TestCase):
 
         self.fund = Fund(date(start_year - 1, 12, 31), "Sample Fund")
         self.fund.contribute(1000, date(start_year, 1, 1), Frequency.MONTHLY)
-        self.fund.set_apy(5.0)
+        self.fund.set_apy(default_apy)
         year_index = 0
         year = start_year
         while year < retirement_year:
-            self.fund.set_apy(self.returns_sp500[year_index])
+            if use_historical_sp500:
+                self.fund.set_apy(self.returns_sp500[year_index])
             self.fund.advance_time(date(year, 1, 1))
             year += 1
             year_index += 1
@@ -35,7 +39,8 @@ class MyTestCase(unittest.TestCase):
         self.fund.contribute(0, retirement_date + timedelta(days=1), Frequency.NONE)
 
         while year < begin_withdrawal_year:
-            self.fund.set_apy(self.returns_sp500[year_index])
+            if use_historical_sp500:
+                self.fund.set_apy(self.returns_sp500[year_index])
             self.fund.advance_time(date(year, 1, 1))
             year += 1
             year_index += 1
@@ -44,11 +49,11 @@ class MyTestCase(unittest.TestCase):
         draw_down_date = self.fund.get_current_date()
         self.fund.contribute(-5000, draw_down_date + timedelta(days=1), Frequency.MONTHLY)
         while year <= death_year:
-            self.fund.set_apy(self.returns_sp500[year_index])
+            if use_historical_sp500:
+                self.fund.set_apy(self.returns_sp500[year_index])
             self.fund.advance_time(date(year, 1, 1))
             year += 1
             year_index += 1
-            # print(year)
 
         print(f"Last year {year}")
 
