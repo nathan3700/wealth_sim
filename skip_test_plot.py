@@ -12,39 +12,66 @@ import random
 class MyTestCase(unittest.TestCase):
     def setUp(self) -> None:
         self.years_sp500, self.returns_sp500 = self.get_sp500_returns_from_csv()
-        random.seed(26)
+        random.seed(27)
+        random.shuffle(self.returns_sp500)
+        start_year = 2000
+        retirement_year = 2030
+        begin_withdrawal_year = 2035
+        death_year = 2060
 
-        self.fund = Fund(date(1999, 12, 31), "Sample Fund")
-        self.fund.contribute(1000, date(2000, 1, 1), Frequency.MONTHLY)
+        self.fund = Fund(date(start_year - 1, 12, 31), "Sample Fund")
+        self.fund.contribute(1000, date(start_year, 1, 1), Frequency.MONTHLY)
         self.fund.set_apy(5.0)
-        for year in range(30 + 1):
-            self.fund.set_apy(self.returns_sp500[random.randrange(0, len(self.returns_sp500))])
-            self.fund.advance_time(date(2000 + year, 1, 1))
+        year_index = 0
+        year = start_year
+        while year < retirement_year:
+            self.fund.set_apy(self.returns_sp500[year_index])
+            self.fund.advance_time(date(year, 1, 1))
+            year += 1
+            year_index += 1
+            # print(year)
 
         retirement_date = self.fund.get_current_date()
         self.fund.contribute(0, retirement_date + timedelta(days=1), Frequency.NONE)
-        # Retire but postpone withdrawals for 5 years
-        for year in range(5 + 1):
-            self.fund.set_apy(self.returns_sp500[random.randrange(0, len(self.returns_sp500))])
-            self.fund.advance_time(date(retirement_date.year + year, 1, 1))
+
+        while year < begin_withdrawal_year:
+            self.fund.set_apy(self.returns_sp500[year_index])
+            self.fund.advance_time(date(year, 1, 1))
+            year += 1
+            year_index += 1
+            # print(year)
+
         draw_down_date = self.fund.get_current_date()
         self.fund.contribute(-5000, draw_down_date + timedelta(days=1), Frequency.MONTHLY)
-        for year in range(25 + 1):
-            self.fund.set_apy(self.returns_sp500[random.randrange(0, len(self.returns_sp500))])
-            self.fund.advance_time(date(draw_down_date.year + year, 1, 1))
+        while year <= death_year:
+            self.fund.set_apy(self.returns_sp500[year_index])
+            self.fund.advance_time(date(year, 1, 1))
+            year += 1
+            year_index += 1
+            # print(year)
+
+        print(f"Last year {year}")
 
     def test_plot_fund(self):
         x_values = [h.date.year for h in self.fund.balance_history]
         y_values = [h.amount for h in self.fund.balance_history]
 
-        f = plt.plot(x_values, y_values, label=f"Balance from {self.fund.balance_history[0].date} " +
-        f" to {self.fund.balance_history[len(self.fund.balance_history) - 1].date}")
+        fig, ax1 = plt.subplots(sharex=True)
+        ax2 = ax1.twinx()
+
+        label_info = f"Balance from {self.fund.balance_history[0].date} " + f" to {self.fund.balance_history[len(self.fund.balance_history) - 1].date}"
+        print(label_info)
+        ax1.plot(x_values, y_values, color='b', label=label_info)
+
+        ax2.plot(x_values, self.returns_sp500[0:len(y_values)], color='r', label="APY")
 
         plt.xlabel("Years")
-        plt.ylabel('Balance in $')
+        ax1.set_ylabel('Balance in $')
+        ax2.set_ylabel("APY")
         plt.title(self.fund.name)
 
-        plt.legend()
+        ax1.legend()
+        ax2.legend()
         plt.show()
 
     @unittest.skip
