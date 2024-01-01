@@ -20,7 +20,7 @@ class RetirementScenario:
             self.sp500_by_year[year] = self.returns_sp500[index]
             self.inflation_by_year[year] = inflation_data[index]
             self.random_past_years.append(year)
-        random.seed(27)
+        random.seed(26)
         random.shuffle(self.random_past_years)
         self.use_historical_sp500 = True
         self.use_historical_inflation = True
@@ -69,16 +69,21 @@ class RetirementScenario:
         self.fund.set_apy(new_apy)
 
     def visualize_results(self):
-        x_values = [h.date.year for h in self.fund.balance_history]
-        y_values = [h.amount for h in self.fund.balance_history]
+        years = []
+        balances = []
+        for h in self.fund.balance_history:
+            years.append(h.date.year)
+            balances.append(h.amount)
+        apy_values = [apy for apy in self.fund.apy_history]
 
         fig, ax1 = plt.subplots(sharex=True)
         ax2 = ax1.twinx()
+        assert(len(balances) == len(apy_values))
 
-        ax1.plot(x_values, self.returns_sp500[0:len(y_values)], color='r', label="APY")
+        ax1.bar(years, apy_values, color='r', label="APY")
         ax1.set_ylabel("APY")
         label_info = f"Balance from {self.fund.balance_history[0].date} " + f" to {self.fund.balance_history[len(self.fund.balance_history) - 1].date}"
-        ax2.plot(x_values, y_values, color='b', label=label_info)
+        ax2.plot(years, balances, color='b', label=label_info, )
         ax2.set_ylabel('Balance in $')
 
         plt.xlabel("Years")
