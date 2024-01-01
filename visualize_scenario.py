@@ -1,4 +1,3 @@
-import unittest
 from datetime import date, timedelta
 from fund import Fund
 from contribution_schedule import Frequency
@@ -9,14 +8,23 @@ import numpy as np
 import random
 
 
-class MyTestCase(unittest.TestCase):
-    def setUp(self) -> None:
-        self.years_sp500, self.returns_sp500 = self.get_sp500_returns_from_csv()
+class RetirementScenario:
+    def __init__(self):
+        self.years_sp500, self.returns_sp500 = self.get_data_from_csv("sp500_returns_1928_2022.csv")
+        years_inflation, inflation_data = self.get_data_from_csv("us_BLS_cpiu_inflation_1928_2022.csv")
+        self.sp500_by_year = dict()
+        self.inflation_by_year = dict()
+        self.random_past_years = []
+        for index in range(len(self.years_sp500)):
+            year = self.years_sp500[index]
+            self.sp500_by_year[year] = self.returns_sp500[index]
+            self.inflation_by_year[year] = inflation_data[index]
+            self.random_past_years.append(year)
         random.seed(27)
-        use_historical_sp500 = False
-        if use_historical_sp500:
-            random.shuffle(self.returns_sp500)
-        default_apy = 4.5
+        random.shuffle(self.random_past_years)
+        self.use_historical_sp500 = True
+        self.use_historical_inflation = True
+        self.default_apy = 4.5
         start_year = 2000
         retirement_year = 2030
         begin_withdrawal_year = 2035
@@ -24,63 +32,63 @@ class MyTestCase(unittest.TestCase):
 
         self.fund = Fund(date(start_year - 1, 12, 31), "Sample Fund")
         self.fund.contribute(1000, date(start_year, 1, 1), Frequency.MONTHLY)
-        self.fund.set_apy(default_apy)
         year_index = 0
         year = start_year
         while year < retirement_year:
-            if use_historical_sp500:
-                self.fund.set_apy(self.returns_sp500[year_index])
+            self.update_apy(year_index)
             self.fund.advance_time(date(year, 1, 1))
             year += 1
             year_index += 1
-            # print(year)
 
         retirement_date = self.fund.get_current_date()
         self.fund.contribute(0, retirement_date + timedelta(days=1), Frequency.NONE)
 
         while year < begin_withdrawal_year:
-            if use_historical_sp500:
-                self.fund.set_apy(self.returns_sp500[year_index])
+            self.update_apy(year_index)
             self.fund.advance_time(date(year, 1, 1))
             year += 1
             year_index += 1
-            # print(year)
 
         draw_down_date = self.fund.get_current_date()
         self.fund.contribute(-5000, draw_down_date + timedelta(days=1), Frequency.MONTHLY)
         while year <= death_year:
-            if use_historical_sp500:
-                self.fund.set_apy(self.returns_sp500[year_index])
+            self.update_apy(year_index)
             self.fund.advance_time(date(year, 1, 1))
             year += 1
             year_index += 1
 
         print(f"Last year {year}")
 
-    def test_plot_fund(self):
+    def update_apy(self, year_index):
+        if self.use_historical_sp500:
+            new_apy = self.sp500_by_year[self.random_past_years[year_index]]
+        else:
+            new_apy = self.default_apy
+        if self.use_historical_inflation:
+            new_apy -= self.inflation_by_year[self.random_past_years[year_index]]
+        self.fund.set_apy(new_apy)
+
+    def visualize_results(self):
         x_values = [h.date.year for h in self.fund.balance_history]
         y_values = [h.amount for h in self.fund.balance_history]
 
         fig, ax1 = plt.subplots(sharex=True)
         ax2 = ax1.twinx()
 
+        ax1.plot(x_values, self.returns_sp500[0:len(y_values)], color='r', label="APY")
+        ax1.set_ylabel("APY")
         label_info = f"Balance from {self.fund.balance_history[0].date} " + f" to {self.fund.balance_history[len(self.fund.balance_history) - 1].date}"
-        print(label_info)
-        ax1.plot(x_values, y_values, color='b', label=label_info)
-
-        ax2.plot(x_values, self.returns_sp500[0:len(y_values)], color='r', label="APY")
+        ax2.plot(x_values, y_values, color='b', label=label_info)
+        ax2.set_ylabel('Balance in $')
 
         plt.xlabel("Years")
-        ax1.set_ylabel('Balance in $')
-        ax2.set_ylabel("APY")
         plt.title(self.fund.name)
 
         ax1.legend()
         ax2.legend()
         plt.show()
 
-    @unittest.skip
-    def test_shape_market_returns(self):
+    def visualize_market_returns_distribution(self):
         # See https://papers.ssrn.com/sol3/papers.cfm?abstract_id=955639
         # Egan proposes a t-distribution for SP500 returns with nu=3.6 to widen the tails to
         # increase the likelihood of more extreme returns
@@ -112,21 +120,22 @@ class MyTestCase(unittest.TestCase):
         plt.show()
 
     @staticmethod
-    def get_sp500_returns_from_csv():
-        returns_csv = open("sp500_returns_1928_2022.csv", newline='')  # csv.reader does its own newline handling
+    def get_data_from_csv(file: str):
+        csv_file_handle = open(file, newline='')  # csv.reader does its own newline handling
         header_row = []
-        years = []
-        returns = []
-        for row in csv.reader(returns_csv):
+        col1 = []
+        col2 = []
+        for row in csv.reader(csv_file_handle):
             if len(header_row) == 0:
                 header_row = row
             else:
-                years.append(int(row[0]))
+                col1.append(int(row[0]))
                 yearly_return = row[1].strip("%")
-                returns.append(float(yearly_return))
-        returns_csv.close()
-        return years, returns
+                col2.append(float(yearly_return))
+        csv_file_handle.close()
+        return col1, col2
 
 
 if __name__ == '__main__':
-    unittest.main()
+    s = RetirementScenario()
+    s.visualize_results()
