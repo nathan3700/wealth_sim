@@ -74,6 +74,13 @@ class BaseContributionSchedule(ABC):
         self.future_one_time_contributions = keep
         return contributions
 
+    def inflate_contributions(self, inflation_percent_rate):
+        self.amount *= (1 + inflation_percent_rate/100)
+        for index in range(len(self.future_one_time_contributions)):
+            one_time_date, one_time_value = self.future_one_time_contributions[index]
+            new_value = one_time_value * (1 + inflation_percent_rate/100)
+            self.future_one_time_contributions[index] = (one_time_date, new_value)
+
 
 class NoneSchedule(BaseContributionSchedule):
     def __init__(self):

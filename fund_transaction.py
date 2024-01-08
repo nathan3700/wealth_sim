@@ -6,8 +6,12 @@ class FundTransactionType(Enum):
     INSUFFICIENT_FUNDS = auto()
     PERIODIC = auto()
     ONE_TIME = auto()
+    PERIODIC_CHANGE = auto()
     GROWTH = auto()
     BALANCE = auto()
+    CONTRIBUTION_SUMMARY = auto()
+    APY = auto()
+    INFLATION = auto()
 
 
 class FundTransaction:

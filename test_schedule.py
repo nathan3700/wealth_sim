@@ -226,6 +226,17 @@ class TestContributionSchedule(unittest.TestCase):
         self.assertEqual(date(1901, 2, 1), csm.last_contribution_date)
         self.assertEqual(2 + 24, self.add_up(received))
 
+    def test_inflate_contributions(self):
+        start_date = date(1800, 5, 5)
+        csm = SemiMonthlySchedule(1000, start_date)
+        csm.add_one_time_contribution(10, start_date)
+        csm.inflate_contributions(20)
+        self.assertEqual(1200, csm.amount)
+        for one_time_date, one_time in csm.future_one_time_contributions:
+            self.assertEqual(12, one_time)
+
+
+
 
 if __name__ == '__main__':
     unittest.main()

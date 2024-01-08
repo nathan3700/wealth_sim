@@ -1,104 +1,185 @@
 from datetime import date, timedelta
-from fund import Fund
+from wealth_fund import Fund, FundTransactionType, FundTransaction
 from contribution_schedule import Frequency
 import csv
 from scipy.stats import t, norm
 import matplotlib.pyplot as plt
 import numpy as np
 import random
+from typing import List
 
 
 class RetirementScenario:
     def __init__(self):
-        self.years_sp500, self.returns_sp500 = self.get_data_from_csv("sp500_returns_1928_2022.csv")
-        years_inflation, inflation_data = self.get_data_from_csv("us_BLS_cpiu_inflation_1928_2022.csv")
+        self.scenario_name = "Sample Fund"
+        # Inputs
+        self.monthly_contribution = 500
+        self.retirement_year = 2030
+        self.start_year = 2000
+        self.death_year = 2060
+        self.begin_withdrawal_year = 2035
+        self.retirement_monthly_withdrawal = 5000
+        self.use_historical_sp500 = True
+        self.reduce_apy_by_inflation = False
+        self.apply_inflation_to_contributions = True
+        self.default_apy = 4.5
+        # Outputs
+        self.results: List[List[FundTransaction]] = []
+
+        # State
         self.sp500_by_year = dict()
         self.inflation_by_year = dict()
+        self.past_years = []
         self.random_past_years = []
-        for index in range(len(self.years_sp500)):
-            year = self.years_sp500[index]
-            self.sp500_by_year[year] = self.returns_sp500[index]
+        self.load_historical_data()
+
+    def load_historical_data(self):
+        years_sp500, returns_sp500 = self.get_data_from_csv("sp500_returns_1928_2022.csv")
+        years_inflation, inflation_data = self.get_data_from_csv("us_BLS_cpiu_inflation_1928_2022.csv")
+        for index in range(len(years_sp500)):
+            year = years_sp500[index]
+            self.sp500_by_year[year] = returns_sp500[index]
             self.inflation_by_year[year] = inflation_data[index]
-            self.random_past_years.append(year)
-        random.seed(26)
+            self.past_years.append(year)
+
+    @staticmethod
+    def get_data_from_csv(file: str):
+        csv_file_handle = open(file, newline='')  # csv.reader does its own newline handling
+        header_row = []
+        col1 = []
+        col2 = []
+        for row in csv.reader(csv_file_handle):
+            if len(header_row) == 0:
+                header_row = row
+            else:
+                col1.append(int(row[0]))
+                yearly_return = row[1].strip("%")
+                col2.append(float(yearly_return))
+        csv_file_handle.close()
+        return col1, col2
+
+    def run_scenario(self, seeds: []):
+        for seed in seeds:
+            self.randomize_historical_order(seed)
+            fund = Fund(date(self.start_year - 1, 12, 31), self.scenario_name)
+            fund.contribute(self.monthly_contribution, date(self.start_year, 1, 1), Frequency.MONTHLY)
+            year_index = 0
+            year = self.start_year
+            while year < self.retirement_year:
+                self.update_apy(year_index, fund)
+                fund.advance_time(date(year, 1, 1))
+                year += 1
+                year_index += 1
+            retirement_date = fund.get_current_date()
+            fund.contribute(0, retirement_date + timedelta(days=1), Frequency.NONE)
+            while year < self.begin_withdrawal_year:
+                self.update_apy(year_index, fund)
+                fund.advance_time(date(year, 1, 1))
+                year += 1
+                year_index += 1
+            draw_down_date = fund.get_current_date()
+            fund.contribute(-self.retirement_monthly_withdrawal, draw_down_date + timedelta(days=1), Frequency.MONTHLY)
+            while year <= self.death_year:
+                self.update_apy(year_index, fund)
+                fund.advance_time(date(year, 1, 1))
+                year += 1
+                year_index += 1
+
+            self.results.append(fund.history)
+
+    def randomize_historical_order(self, seed: int):
+        random.seed(seed)
+        self.random_past_years = [y for y in self.past_years]  # Duplicate
         random.shuffle(self.random_past_years)
-        self.use_historical_sp500 = True
-        self.use_historical_inflation = True
-        self.default_apy = 4.5
-        start_year = 2000
-        retirement_year = 2030
-        begin_withdrawal_year = 2035
-        death_year = 2060
 
-        self.fund = Fund(date(start_year - 1, 12, 31), "Sample Fund")
-        self.fund.contribute(1000, date(start_year, 1, 1), Frequency.MONTHLY)
-        year_index = 0
-        year = start_year
-        while year < retirement_year:
-            self.update_apy(year_index)
-            self.fund.advance_time(date(year, 1, 1))
-            year += 1
-            year_index += 1
-
-        retirement_date = self.fund.get_current_date()
-        self.fund.contribute(0, retirement_date + timedelta(days=1), Frequency.NONE)
-
-        while year < begin_withdrawal_year:
-            self.update_apy(year_index)
-            self.fund.advance_time(date(year, 1, 1))
-            year += 1
-            year_index += 1
-
-        draw_down_date = self.fund.get_current_date()
-        self.fund.contribute(-5000, draw_down_date + timedelta(days=1), Frequency.MONTHLY)
-        while year <= death_year:
-            self.update_apy(year_index)
-            self.fund.advance_time(date(year, 1, 1))
-            year += 1
-            year_index += 1
-
-        print(f"Last year {year}")
-
-    def update_apy(self, year_index):
+    def update_apy(self, year_index, fund: Fund):
         if self.use_historical_sp500:
             new_apy = self.sp500_by_year[self.random_past_years[year_index]]
         else:
             new_apy = self.default_apy
-        if self.use_historical_inflation:
+        if self.reduce_apy_by_inflation:
             new_apy -= self.inflation_by_year[self.random_past_years[year_index]]
-        self.fund.set_apy(new_apy)
+        fund.set_apy(new_apy)
 
-    def visualize_results(self):
-        years = []
-        balances = []
-        for h in self.fund.balance_history:
-            years.append(h.date.year)
-            balances.append(h.amount)
-        apy_values = [apy for apy in self.fund.apy_history]
+        if self.apply_inflation_to_contributions:
+            fund.set_inflation_rate(self.inflation_by_year[self.random_past_years[year_index]])
 
-        fig, ax1 = plt.subplots(sharex=True)
+
+class WealthVisualizer:
+    def __init__(self):
+        self.name = "Wealth Visualizer"
+        self.colors = []
+
+    def visualize_results(self, results: List[List[FundTransaction]]):
+        fig1, ax1 = plt.subplots(sharex=True)
         ax2 = ax1.twinx()
-        assert(len(balances) == len(apy_values))
+        fig2, ax3 = plt.subplots(sharex=True)
+        self.make_n_colors(len(results))
+        color_index = 0
+        first_date = None
+        last_date = None
 
-        ax1.bar(years, apy_values, color='r', label="APY")
-        ax1.set_ylabel("APY")
-        label_info = f"Balance from {self.fund.balance_history[0].date} " + f" to {self.fund.balance_history[len(self.fund.balance_history) - 1].date}"
-        ax2.plot(years, balances, color='b', label=label_info, )
+        for history in results:
+            years = []
+            balances = []
+            balance_dates = []
+            apy_values = []
+            yearly_contrib = []
+            for h in history:
+                if h.type == FundTransactionType.BALANCE:
+                    balance_dates.append(h.date)
+                    years.append(h.date.year)
+                    balances.append(h.amount)
+                if h.type == FundTransactionType.APY:
+                    apy_values.append(h.amount)
+                if h.type == FundTransactionType.CONTRIBUTION_SUMMARY:
+                    yearly_contrib.append(h.amount)
+
+            assert(len(balances) == len(apy_values))
+            first_date = balance_dates[0]
+            last_date = balance_dates[len(balance_dates) - 1]
+
+            ax1.bar(years, apy_values, color=self.colors[color_index], alpha=0.5)
+            ax2.plot(years, balances, color=self.colors[color_index], label=f"Simulation {color_index}")
+
+            ax3.plot(years, yearly_contrib, color=self.colors[color_index] )
+            color_index += 1
+
+        ax1.set_title(f"Balance from {first_date} " + f" to {last_date}")
+        ax1.set_ylabel("Market APY")
+        ax1.set_xlabel("Years")
+
         ax2.set_ylabel('Balance in $')
-
-        plt.xlabel("Years")
-        plt.title(self.fund.name)
-
-        ax1.legend()
+        ax2.set_xlabel("Years")
         ax2.legend()
+
+        ax3.set_title("Contributions/Withdrawals")
+        ax3.set_ylabel("Amount added/removed in $")
+        ax3.set_xlabel("Years")
         plt.show()
 
-    def visualize_market_returns_distribution(self):
+    def make_n_colors(self, n: int):
+        initial_color = (0.5, 0.0, 0.2)
+        step_size = 1.0 / n
+
+        self.colors = []
+        for i in range(n):
+            # Increment RGB values by the step size
+            new_color = (
+                (initial_color[0] + step_size * i) % 1.0,  # Red component
+                (initial_color[1] + step_size * i) % 1.0,  # Green component
+                (initial_color[2] + step_size * i) % 1.0  # Blue component
+            )
+            self.colors.append(new_color)
+
+    @staticmethod
+    def visualize_market_returns_distribution():
         # See https://papers.ssrn.com/sol3/papers.cfm?abstract_id=955639
         # Egan proposes a t-distribution for SP500 returns with nu=3.6 to widen the tails to
         # increase the likelihood of more extreme returns
         # Also see https://pages.stern.nyu.edu/~adamodar/New_Home_Page/datafile/histretSP.html  for historical SP500
-        returns = self.returns_sp500
+        scenario = RetirementScenario()
+        returns = scenario.sp500_by_year.values()
 
         location = 11.5  # Mean of returns (about 11.5%)
         scale = 23  # Standard deviation
@@ -124,23 +205,9 @@ class RetirementScenario:
         plt.legend()
         plt.show()
 
-    @staticmethod
-    def get_data_from_csv(file: str):
-        csv_file_handle = open(file, newline='')  # csv.reader does its own newline handling
-        header_row = []
-        col1 = []
-        col2 = []
-        for row in csv.reader(csv_file_handle):
-            if len(header_row) == 0:
-                header_row = row
-            else:
-                col1.append(int(row[0]))
-                yearly_return = row[1].strip("%")
-                col2.append(float(yearly_return))
-        csv_file_handle.close()
-        return col1, col2
-
 
 if __name__ == '__main__':
+    v = WealthVisualizer()
     s = RetirementScenario()
-    s.visualize_results()
+    s.run_scenario(seeds=[26, 27])
+    v.visualize_results(s.results)
