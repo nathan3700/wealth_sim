@@ -1,15 +1,23 @@
 from datetime import date, timedelta
 from wealth_fund import Fund, FundTransactionType, FundTransaction
-from contribution_schedule import Frequency
+from transfer_schedule import Frequency
 import csv
 from scipy.stats import t, norm
 import matplotlib.pyplot as plt
 import numpy as np
 import random
-from typing import List
+from typing import List, ForwardRef
+RetirementScenarioRef = ForwardRef('RetirementScenario')
 
 
 class RetirementScenario:
+    class Run:
+        def __init__(self, scenario: RetirementScenarioRef, seed: int, results: List[FundTransaction]):
+            self.results = results
+            self.scenario: scenario
+            self.seed = seed
+            self.color_index = 0
+
     def __init__(self):
         self.scenario_name = "Sample Fund"
         # Inputs
@@ -24,7 +32,7 @@ class RetirementScenario:
         self.apply_inflation_to_contributions = True
         self.default_apy = 4.5
         # Outputs
-        self.results: List[List[FundTransaction]] = []
+        self.runs: List[RetirementScenario.Run] = []
 
         # State
         self.sp500_by_year = dict()
@@ -84,8 +92,8 @@ class RetirementScenario:
                 fund.advance_time(date(year, 1, 1))
                 year += 1
                 year_index += 1
-
-            self.results.append(fund.history)
+            run = RetirementScenario.Run(self, seed, fund.history)
+            self.runs.append(run)
 
     def randomize_historical_order(self, seed: int):
         random.seed(seed)
@@ -109,54 +117,89 @@ class WealthVisualizer:
     def __init__(self):
         self.name = "Wealth Visualizer"
         self.colors = []
+        self.worst_balance = None
+        self.worst_run = RetirementScenario.Run(None, 0, [])
+        self.best_balance = 0.0
+        self.best_run = RetirementScenario.Run(None, 0, [])
 
-    def visualize_results(self, results: List[List[FundTransaction]]):
-        fig1, ax1 = plt.subplots(sharex=True)
-        ax2 = ax1.twinx()
-        fig2, ax3 = plt.subplots(sharex=True)
-        self.make_n_colors(len(results))
+    def visualize_results(self, runs: List[RetirementScenario.Run]):
+        fig1, fig1_axes = plt.subplots(1, 2, figsize=(12, 5))
+        ax_balances = fig1_axes[0]
+        ax_transfers = fig1_axes[1]
+        fig2, fig2_axes = plt.subplots(1, 2, figsize=(12, 5))
+        ax_worst_apys = fig2_axes[0]
+        ax_worst_run = ax_worst_apys.twinx()
+        ax_best_apys = fig2_axes[1]
+        ax_best_run = ax_best_apys.twinx()
+        self.make_n_colors(len(runs))
         color_index = 0
         first_date = None
         last_date = None
 
-        for history in results:
-            years = []
-            balances = []
-            balance_dates = []
-            apy_values = []
-            yearly_contrib = []
-            for h in history:
-                if h.type == FundTransactionType.BALANCE:
-                    balance_dates.append(h.date)
-                    years.append(h.date.year)
-                    balances.append(h.amount)
-                if h.type == FundTransactionType.APY:
-                    apy_values.append(h.amount)
-                if h.type == FundTransactionType.CONTRIBUTION_SUMMARY:
-                    yearly_contrib.append(h.amount)
-
-            assert(len(balances) == len(apy_values))
+        for run in runs:
+            apy_values, balance_dates, balances, yearly_contrib, years = self.extract_history(run)
             first_date = balance_dates[0]
-            last_date = balance_dates[len(balance_dates) - 1]
+            highest_index = len(balance_dates) - 1
+            last_date = balance_dates[highest_index]
 
-            ax1.bar(years, apy_values, color=self.colors[color_index], alpha=0.5)
-            ax2.plot(years, balances, color=self.colors[color_index], label=f"Simulation {color_index}")
-
-            ax3.plot(years, yearly_contrib, color=self.colors[color_index] )
+            run.color_index = color_index
+            ax_balances.plot(years, balances, color=self.colors[color_index], label=f"Seed {run.seed}")
+            ax_transfers.plot(years, yearly_contrib, color=self.colors[color_index])
             color_index += 1
 
-        ax1.set_title(f"Balance from {first_date} " + f" to {last_date}")
-        ax1.set_ylabel("Market APY")
-        ax1.set_xlabel("Years")
+        date_range_str = f"Balance from {first_date} " + f" to {last_date}"
+        ax_balances.set_title(date_range_str)
+        ax_balances.set_ylabel('Balance in M$')
+        ax_balances.yaxis.set_major_formatter(self.millions_formatter)
+        ax_balances.set_xlabel("Years")
+        ax_balances.legend()
 
-        ax2.set_ylabel('Balance in $')
-        ax2.set_xlabel("Years")
-        ax2.legend()
+        ax_transfers.set_title("Annual Contributions/Withdrawals")
+        ax_transfers.set_ylabel("Yearly Transfers In(+)/Out(-) K$ (Thousands)")
+        ax_transfers.yaxis.set_major_formatter(self.thousands_formatter)
+        ax_transfers.set_xlabel("Years")
 
-        ax3.set_title("Contributions/Withdrawals")
-        ax3.set_ylabel("Amount added/removed in $")
-        ax3.set_xlabel("Years")
+        self.plot_single_results(ax_worst_apys, ax_worst_run, "Worst", self.worst_run)
+        self.plot_single_results(ax_best_apys, ax_best_run, "Best", self.best_run)
+
+        plt.tight_layout(pad=3.0)
         plt.show()
+
+    def extract_history(self, run: RetirementScenario.Run):
+        years = []
+        balances = []
+        balance_dates = []
+        apy_values = []
+        yearly_contrib = []
+        for h in run.results:
+            if h.type == FundTransactionType.BALANCE:
+                balance_dates.append(h.date)
+                years.append(h.date.year)
+                balances.append(h.amount)
+            if h.type == FundTransactionType.APY:
+                apy_values.append(h.amount)
+            if h.type == FundTransactionType.CONTRIBUTION_SUMMARY:
+                yearly_contrib.append(h.amount)
+
+        assert(len(balances) == len(apy_values))
+        assert(len(balances) == len(years))
+
+        highest_index = len(balance_dates) - 1
+        if balances[highest_index] > self.best_balance:
+            self.best_balance = balances[highest_index]
+            self.best_run = run
+        if (self.worst_balance is None) or (balances[highest_index] < self.worst_balance):
+            self.worst_balance = balances[highest_index]
+            self.worst_run = run
+        return apy_values, balance_dates, balances, yearly_contrib, years
+
+    @staticmethod
+    def extract_inflation(run: RetirementScenario.Run):
+        inflation_history = []
+        for h in run.results:
+            if h.type == FundTransactionType.INFLATION:
+                inflation_history.append(h.amount)
+        return inflation_history
 
     def make_n_colors(self, n: int):
         initial_color = (0.5, 0.0, 0.2)
@@ -171,6 +214,27 @@ class WealthVisualizer:
                 (initial_color[2] + step_size * i) % 1.0  # Blue component
             )
             self.colors.append(new_color)
+
+    def plot_single_results(self, apy_axes, balances_axes, kind_of_performance, run):
+        apy_values, balance_dates, balances, yearly_contrib, years = self.extract_history(run)
+        balances_axes.set_title(f"{kind_of_performance} Performance (Seed={run.seed})")
+        balances_axes.plot(years, balances, color=self.colors[run.color_index], label=f"Seed {run.seed}")
+        balances_axes.plot(years, yearly_contrib, color='black', label=f"Transfers")
+        balances_axes.set_ylabel('Balance in K$')
+        balances_axes.yaxis.set_major_formatter(self.thousands_formatter)
+        balances_axes.legend()
+        apy_axes.bar(years, apy_values, color="green", alpha=0.5, label="APY")
+        apy_axes.bar(years, self.extract_inflation(run), color="black", alpha=0.5, label="Inflation")
+        apy_axes.set_ylabel('Annual Percentage Return')
+        apy_axes.legend()
+
+    @staticmethod
+    def millions_formatter(x, pos):
+        return f'{x / 1e6:.0f}M'  # Formats numbers in millions
+
+    @staticmethod
+    def thousands_formatter(x, pos):
+        return f'{x / 1e3:.0f}K'
 
     @staticmethod
     def visualize_market_returns_distribution():
@@ -209,5 +273,5 @@ class WealthVisualizer:
 if __name__ == '__main__':
     v = WealthVisualizer()
     s = RetirementScenario()
-    s.run_scenario(seeds=[26, 27])
-    v.visualize_results(s.results)
+    s.run_scenario(seeds=[26, 27, 28, 29, 2342, 242, 999, 24442, 341, 1001])
+    v.visualize_results(s.runs)

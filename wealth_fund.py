@@ -1,6 +1,6 @@
 import math
 
-from contribution_schedule import *
+from transfer_schedule import *
 
 
 class FundError(Exception):
@@ -8,7 +8,7 @@ class FundError(Exception):
 
 
 class Fund:
-    def __init__(self,  inception_date: date, name="No Name Fund"):
+    def __init__(self, inception_date: date, name="No Name Fund"):
         self.balance = 0.0
         self.apy = 0.0  # Annual Percentage Yield
         self.daily_rate = 0.0
@@ -30,7 +30,7 @@ class Fund:
         # There can only be one periodic schedule.  A new frequency will replace an old one.
         # ONCE is special in that it can be scheduled now without replacing a periodic schedule
         if frequency == Frequency.ONCE:
-            self.contribution_schedule.add_one_time_contribution(amount, start_date)
+            self.contribution_schedule.add_one_time_transfer(amount, start_date)
         else:
             # The remaining types will cause a change to the schedule
             if self.contribution_schedule.frequency is not frequency:
@@ -52,42 +52,56 @@ class Fund:
             raise FundError(
                 f"advance_time is advancing to a date in the past.  Current Fund Date {self.current_date}, Next Date {new_date}")
         while self.current_date < new_date:
-            next_contrib_date = self.contribution_schedule.get_next_contribution_date()
+            next_contrib_date = self.contribution_schedule.get_next_transfer_date()
+            next_jan_first = date(self.current_date.year + 1, 1, 1)
             if self.current_date < next_contrib_date <= new_date:
-                self.advance_time_partial(next_contrib_date)
+                if next_jan_first < next_contrib_date:
+                    self.advance_time_partial(next_jan_first)
+                else:
+                    self.advance_time_partial(next_contrib_date)
             else:
-                self.advance_time_partial(new_date)
+                if next_jan_first < new_date:
+                    self.advance_time_partial(next_jan_first)
+                else:
+                    self.advance_time_partial(new_date)
 
     def advance_time_partial(self, new_date: date):
+        # Apply growth first before possible withdrawals
+        elapsed_days = (new_date - self.current_date).days
+        if self.balance == 0:
+            growth = 0
+        else:
+            growth = self.balance * ((1 + self.daily_rate) ** elapsed_days) - self.balance
+        self.history.append(FundTransaction(new_date, self.nearest_hundredth(growth), FundTransactionType.GROWTH))
+        self.total_growth += growth
+        self.balance += growth
+
         if new_date.year > self.current_date.year:
             self.do_end_of_year_accounting()
-        new_contrib_records = self.contribution_schedule.get_contributions_until(new_date)
+
+        new_contrib_records = self.contribution_schedule.get_transfers_until(new_date)
         self.history += new_contrib_records
         new_contributions = self.add_up(new_contrib_records)
-        self.contributions_this_year = self.nearest_hundredth(self.contributions_this_year + new_contributions)
-        self.total_contributions = self.nearest_hundredth(self.total_contributions + new_contributions)
-
-        # Apply growth first before new history
-        elapsed_days = (new_date - self.current_date).days
-        growth = self.nearest_hundredth(self.balance * ((1 + self.daily_rate) ** elapsed_days) - self.balance)
-        self.history.append(FundTransaction(new_date, growth, FundTransactionType.GROWTH))
-        self.total_growth = self.nearest_hundredth(self.total_growth + growth)
-
-        self.balance = self.nearest_hundredth(self.balance + growth + new_contributions)
-        if self.balance < 0:
-            underflow = 0 - self.balance
-            self.balance = 0
-            self.history.append(FundTransaction(new_date, underflow, FundTransactionType.INSUFFICIENT_FUNDS))
+        if self.balance + new_contributions < 0:
+            underflow = self.balance + new_contributions
+            new_contributions -= underflow
+            self.history.append(
+                FundTransaction(new_date, self.nearest_hundredth(underflow), FundTransactionType.INSUFFICIENT_FUNDS))
+            self.contribution_schedule.amount = 0
+        self.contributions_this_year += new_contributions
+        self.total_contributions += new_contributions
+        self.balance += new_contributions
         self.current_date = new_date
 
     def do_end_of_year_accounting(self):
         last_day_of_year = date(self.current_date.year, 12, 31)
-        self.contribution_schedule.inflate_contributions(self.inflation_rate)
+        self.contribution_schedule.inflate_transfer_amounts(self.inflation_rate)
         self.history.append(FundTransaction(last_day_of_year, self.get_balance(), FundTransactionType.BALANCE))
         self.history.append(FundTransaction(last_day_of_year, self.apy, FundTransactionType.APY))
         self.history.append(FundTransaction(last_day_of_year, self.inflation_rate, FundTransactionType.INFLATION))
         self.history.append(
-            FundTransaction(last_day_of_year, self.contributions_this_year, FundTransactionType.CONTRIBUTION_SUMMARY,
+            FundTransaction(last_day_of_year, self.nearest_hundredth(self.contributions_this_year),
+                            FundTransactionType.CONTRIBUTION_SUMMARY,
                             desc="Sum of contributions over the year"))
         self.contributions_this_year = 0.0
 
@@ -106,14 +120,20 @@ class Fund:
         # we must use an absolute value slightly less than 100 to prevent log(0)
         if apy == -100:
             apy = -99.9999
-        self.daily_rate = math.exp(math.log((apy/100)+1)/365) - 1
+        self.daily_rate = math.exp(math.log((apy / 100) + 1) / 365) - 1
 
     def set_daily_rate(self, daily_rate):
         self.daily_rate = daily_rate
         self.apy = self.nearest_hundredth((1 + daily_rate) ** 365 - 1) * 100
 
     def get_balance(self) -> float:
-        return self.balance
+        return self.nearest_hundredth(self.balance)
+
+    def get_total_growth(self) -> float:
+        return self.nearest_hundredth(self.total_growth)
+
+    def get_total_contributions(self) -> float:
+        return self.nearest_hundredth(self.total_contributions)
 
     def set_inflation_rate(self, rate):
         self.inflation_rate = rate
@@ -124,4 +144,4 @@ class Fund:
 
     def add_up(self, contributions: List[FundTransaction]):
         amounts = [c.amount for c in contributions]
-        return self.nearest_hundredth(sum(amounts))
+        return sum(amounts)

@@ -55,7 +55,7 @@ class TestFunds(unittest.TestCase):
     def test_set_apy(self):
         apy = 5.0
         self.fund.set_apy(apy)
-        effective_daily_rate = math.exp(math.log((apy/100)+1)/365) - 1
+        effective_daily_rate = math.exp(math.log((apy / 100) + 1) / 365) - 1
         self.assertEqual(effective_daily_rate, self.fund.daily_rate)
 
         # Now Test going the other way, if we set the daily_rate, it should update APY
@@ -73,12 +73,14 @@ class TestFunds(unittest.TestCase):
         self.fund.advance_time(date(2000, 8, 9))
         balance = self.fund.get_balance()
         self.assertEqual(self.fund.nearest_hundredth(1000 * (1 + effective_daily_rate)), balance)
-        self.assertEqual(self.fund.nearest_hundredth(balance - 1000), self.fund.total_growth)  # Check growth variable here as well
+        # Check growth variable here as well
+        self.assertEqual(self.fund.nearest_hundredth(balance - 1000), self.fund.get_total_growth())
         self.assertEqual(1000, self.fund.total_contributions)  # Check total contrib variable
         self.fund.advance_time((date(2001, 8, 8)))
         elapsed_days = (date(2001, 8, 8) - date(2000, 8, 8)).days
         self.assertEqual(365, elapsed_days)
-        self.assertEqual(self.fund.nearest_hundredth(1000 * (1 + effective_daily_rate) ** elapsed_days), self.fund.get_balance())
+        self.assertEqual(self.fund.nearest_hundredth(1000 * (1 + effective_daily_rate) ** elapsed_days),
+                         self.fund.get_balance())
 
     def test_apy_over_century(self):
         self.fund = Fund(date(1899, 12, 31), "Large Fund")
@@ -87,9 +89,9 @@ class TestFunds(unittest.TestCase):
         self.fund.set_apy(5.0)
         self.fund.advance_time(date(2000, 1, 1))
         elapsed_days = (date(2000, 1, 1) - date(1900, 1, 1)).days
-        self.assertEqual(self.fund.nearest_hundredth((1000000 * (1 + self.fund.daily_rate) ** elapsed_days)), self.fund.get_balance())
-        self.assertEqual(self.fund.nearest_hundredth(self.fund.balance - 1_000_000), self.fund.total_growth)
-
+        self.assertEqual(self.fund.nearest_hundredth((1000000 * (1 + self.fund.daily_rate) ** elapsed_days)),
+                         self.fund.get_balance())
+        self.assertEqual(self.fund.nearest_hundredth(self.fund.balance - 1_000_000), self.fund.get_total_growth())
 
     def test_one_day_lose_all(self):
         self.fund.advance_time(date(2000, 1, 1))
@@ -116,11 +118,13 @@ class TestFunds(unittest.TestCase):
         self.fund.set_daily_rate(.01)
         self.fund.contribute(1.00, date(1978, 6, 1), frequency=Frequency.SEMIMONTHLY)
         self.fund.advance_time(date(1978, 6, 15))
-        self.assertEqual(self.fund.nearest_hundredth(1 * (1.01 ** 14) + 1), self.fund.get_balance())  # 14 days of growth on $1 and another $1
+        self.assertEqual(self.fund.nearest_hundredth(1 * (1.01 ** 14) + 1),
+                         self.fund.get_balance())  # 14 days of growth on $1 and another $1
         balance = self.fund.get_balance()
         self.fund.advance_time(date(1978, 7, 15))
         # Accrue interest 16 days until July 1st, add $1, accrue 14 more days, add $1
-        self.assertEqual(self.fund.nearest_hundredth((balance * (1.01 ** 16) + 1) * (1.01 ** 14) + 1), self.fund.get_balance())
+        self.assertEqual(self.fund.nearest_hundredth((balance * (1.01 ** 16) + 1) * (1.01 ** 14) + 1),
+                         self.fund.get_balance())
 
     def test_cannot_go_negative(self):
         self.fund.set_apy(0)
@@ -131,15 +135,23 @@ class TestFunds(unittest.TestCase):
         insufficient_hist = [h for h in self.fund.history if h.type == FundTransactionType.INSUFFICIENT_FUNDS]
         self.assertEqual(1, len(insufficient_hist))
 
+    def test_withdrawals_cancelled_when_zero_balance(self):
+        self.fund.balance = 10_000
+        self.fund.contribute(-4000, date(1990, 5, 5), frequency=Frequency.MONTHLY)
+        self.fund.advance_time(date(1990, 12, 1))
+        self.assertEqual(-10_000, self.fund.total_contributions)
+        self.assertEqual(0, self.fund.contribution_schedule.amount)
+
     def test_cannot_go_negative_periodic(self):
         self.fund.balance = 500
         self.fund.contribute(-1000, date(1978, 3, 1), frequency=Frequency.MONTHLY)
         self.fund.advance_time(date(1979, 2, 1))
         self.assertEqual(0, self.fund.get_balance())
         insufficient_hist = [h for h in self.fund.history if h.type == FundTransactionType.INSUFFICIENT_FUNDS]
-        self.assertEqual(12, len(insufficient_hist))
+        self.assertEqual(1, len(insufficient_hist))
 
     def test_can_apply_inflation(self):
+        self.fund.advance_time(date(2000, 12, 31))
         self.fund.set_inflation_rate(5)
         self.fund.set_apy(0)
         self.fund.contribute(1, date(2001, 1, 1), Frequency.SEMIMONTHLY)
@@ -156,6 +168,7 @@ class TestFunds(unittest.TestCase):
         self.assertEqual(self.fund.nearest_hundredth(23 * 1 + 24 * 1.1 + 1 * 1.1 * 1.1), self.fund.get_balance())
 
     def test_end_of_year_accounting(self):
+        self.fund = Fund(date(2000, 1, 1), "Unit Test Fund")
         self.fund.contribute(1, date(2001, 1, 15), Frequency.MONTHLY)
         self.fund.advance_time(date(2001, 2, 15))
         self.fund.advance_time(date(2001, 3, 15))
@@ -175,6 +188,20 @@ class TestFunds(unittest.TestCase):
         self.assertEqual(0, contrib_hist[0].amount)
         self.assertEqual(12, contrib_hist[1].amount)
         self.assertEqual(12, contrib_hist[2].amount)
+
+    def test_end_of_year_growth_calculated_on_jan1(self):
+        self.fund = Fund(date(1999, 12, 29), "Unit Test Fund")
+        self.fund.set_daily_rate(0.01)
+        self.fund.contribute(100, date(1999, 12, 30), Frequency.ONCE)
+        self.fund.advance_time(date(2001, 2, 1))
+        balance_hist = [h for h in self.fund.history if h.type == FundTransactionType.BALANCE]
+        self.assertEqual(2, len(balance_hist))
+        # The fact that we advanced time across a year boundary means we should force a growth calc on Jan1
+        balance_with_2_days_earnings = self.fund.nearest_hundredth(100 * (1.01 ** 2))
+        self.assertEqual(balance_with_2_days_earnings, balance_hist[0].amount)
+        # Then another years' growth up to the last day of the next year
+        self.assertEqual(self.fund.nearest_hundredth(balance_with_2_days_earnings * (1.01 ** 366)),
+                         balance_hist[1].amount)
 
 
 if __name__ == '__main__':
