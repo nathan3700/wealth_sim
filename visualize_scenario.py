@@ -6,13 +6,15 @@ from scipy.stats import t, norm
 import matplotlib.pyplot as plt
 import numpy as np
 import random
+from math import ceil
 from typing import List, ForwardRef
 RetirementScenarioRef = ForwardRef('RetirementScenario')
 
 
 class RetirementScenario:
     class Run:
-        def __init__(self, scenario: RetirementScenarioRef, seed: int, results: List[FundTransaction]):
+        def __init__(self, scenario: RetirementScenarioRef, name: str, seed: int, results: List[FundTransaction]):
+            self.name = name
             self.results = results
             self.scenario: scenario
             self.seed = seed
@@ -31,6 +33,7 @@ class RetirementScenario:
         self.reduce_apy_by_inflation = False
         self.apply_inflation_to_contributions = True
         self.default_apy = 4.5
+        self.keep_historical_sp500_sequence = True
         # Outputs
         self.runs: List[RetirementScenario.Run] = []
 
@@ -39,6 +42,8 @@ class RetirementScenario:
         self.inflation_by_year = dict()
         self.past_years = []
         self.random_past_years = []
+        self.random_year_index = 0
+        self.random_start_years_used = set()
         self.load_historical_data()
 
     def load_historical_data(self):
@@ -68,7 +73,14 @@ class RetirementScenario:
 
     def run_scenario(self, seeds: []):
         for seed in seeds:
-            self.randomize_historical_order(seed)
+            self.randomize_history(seed)
+            if self.use_historical_sp500:
+                if self.keep_historical_sp500_sequence:
+                    name = f"Start History {self.past_years[self.random_year_index]}"
+                else:
+                    name = f"Shuffled Years Seed {seed}"
+            else:
+                name = f"?"
             fund = Fund(date(self.start_year - 1, 12, 31), self.scenario_name)
             fund.contribute(self.monthly_contribution, date(self.start_year, 1, 1), Frequency.MONTHLY)
             year_index = 0
@@ -92,35 +104,55 @@ class RetirementScenario:
                 fund.advance_time(date(year, 1, 1))
                 year += 1
                 year_index += 1
-            run = RetirementScenario.Run(self, seed, fund.history)
+            run = RetirementScenario.Run(self, name, seed, fund.history)
             self.runs.append(run)
 
-    def randomize_historical_order(self, seed: int):
+    def randomize_history(self, seed: int):
         random.seed(seed)
-        self.random_past_years = [y for y in self.past_years]  # Duplicate
-        random.shuffle(self.random_past_years)
+        if self.keep_historical_sp500_sequence:
+            tries_left = 5
+            while self.random_year_index in self.random_start_years_used and tries_left > 0:
+                self.random_year_index = random.randint(0, len(self.past_years) - 1)
+                tries_left -= 1
+            self.random_start_years_used.add(self.random_year_index)
+        else:
+            self.random_past_years = [y for y in self.past_years]  # Duplicate
+            random.shuffle(self.random_past_years)
 
     def update_apy(self, year_index, fund: Fund):
+        historical_year = self.pick_new_historical_year(year_index)
+
         if self.use_historical_sp500:
-            new_apy = self.sp500_by_year[self.random_past_years[year_index]]
+            new_apy = self.sp500_by_year[historical_year]
         else:
             new_apy = self.default_apy
         if self.reduce_apy_by_inflation:
-            new_apy -= self.inflation_by_year[self.random_past_years[year_index]]
+            new_apy -= self.inflation_by_year[historical_year]
         fund.set_apy(new_apy)
 
         if self.apply_inflation_to_contributions:
-            fund.set_inflation_rate(self.inflation_by_year[self.random_past_years[year_index]])
+            fund.set_inflation_rate(self.inflation_by_year[historical_year])
+
+    def pick_new_historical_year(self, year_index):
+        if self.keep_historical_sp500_sequence:
+            self.random_year_index += 1
+            if self.random_year_index >= len(self.past_years):
+                self.random_year_index = 0
+            year = self.past_years[self.random_year_index]
+        else:
+            year = self.random_past_years[year_index]
+        return year
 
 
 class WealthVisualizer:
     def __init__(self):
         self.name = "Wealth Visualizer"
         self.colors = []
+        self.line_styles = []
         self.worst_balance = None
-        self.worst_run = RetirementScenario.Run(None, 0, [])
+        self.worst_run = RetirementScenario.Run(None, "", 0, [])
         self.best_balance = 0.0
-        self.best_run = RetirementScenario.Run(None, 0, [])
+        self.best_run = RetirementScenario.Run(None, "", 0, [])
 
     def visualize_results(self, runs: List[RetirementScenario.Run]):
         fig1, fig1_axes = plt.subplots(1, 2, figsize=(12, 5))
@@ -143,8 +175,8 @@ class WealthVisualizer:
             last_date = balance_dates[highest_index]
 
             run.color_index = color_index
-            ax_balances.plot(years, balances, color=self.colors[color_index], label=f"Seed {run.seed}")
-            ax_transfers.plot(years, yearly_contrib, color=self.colors[color_index])
+            ax_balances.plot(years, balances, color=self.colors[color_index], linestyle=self.line_styles[color_index], label=run.name)
+            ax_transfers.plot(years, yearly_contrib, linestyle=self.line_styles[color_index], color=self.colors[color_index])
             color_index += 1
 
         date_range_str = f"Balance from {first_date} " + f" to {last_date}"
@@ -161,9 +193,21 @@ class WealthVisualizer:
 
         self.plot_single_results(ax_worst_apys, ax_worst_run, "Worst", self.worst_run)
         self.plot_single_results(ax_best_apys, ax_best_run, "Best", self.best_run)
+        fig2.tight_layout(pad=3.0)
 
-        plt.tight_layout(pad=3.0)
-        plt.show()
+
+    def plot_single_results(self, apy_axes, balances_axes, kind_of_performance, run):
+        apy_values, balance_dates, balances, yearly_contrib, years = self.extract_history(run)
+        balances_axes.set_title(f"{kind_of_performance} Performance ({run.name})")
+        balances_axes.plot(years, balances, color=self.colors[run.color_index], linestyle=self.line_styles[run.color_index], label=run.name)
+        # balances_axes.plot(years, yearly_contrib, color='black', label=f"Transfers")
+        balances_axes.set_ylabel('Balance in K$')
+        balances_axes.yaxis.set_major_formatter(self.millions_formatter)
+        balances_axes.legend()
+        apy_axes.bar(years, apy_values, color="green", alpha=0.5, label="APY")
+        apy_axes.bar(years, self.extract_inflation(run), color="black", alpha=0.5, label="Inflation")
+        apy_axes.set_ylabel('Percent Change (%)')
+        apy_axes.legend()
 
     def extract_history(self, run: RetirementScenario.Run):
         years = []
@@ -202,39 +246,43 @@ class WealthVisualizer:
         return inflation_history
 
     def make_n_colors(self, n: int):
-        initial_color = (0.5, 0.0, 0.2)
-        step_size = 1.0 / n
-
+        step_size = 1.90 / ceil(n / 3)  # fractions of two colors per primary color (less than 2 to stay less white)
+        line_styles = ['-', '--']
+        rotate_line_style = 0
+        current_dominant_color = 0  # Start on red
+        steps_at_color = [ceil(n / 3), ceil(n / 3), ceil(n / 3)]
+        color = [1.0, 0.0, 0.0]  # Start dominant red
         self.colors = []
+        ping_pong = 0
         for i in range(n):
-            # Increment RGB values by the step size
-            new_color = (
-                (initial_color[0] + step_size * i) % 1.0,  # Red component
-                (initial_color[1] + step_size * i) % 1.0,  # Green component
-                (initial_color[2] + step_size * i) % 1.0  # Blue component
-            )
-            self.colors.append(new_color)
+            # Ensure we didn't pick white
+            if (round(color[0] * 10), round(color[1] * 10), round(color[2] * 10)) != (10, 10, 10):
+                self.colors.append((color[0], color[1], color[2]))
+            else:
+                raise(Exception(f"Unable to create non-white color on iteration {i} colors color={color}"))
 
-    def plot_single_results(self, apy_axes, balances_axes, kind_of_performance, run):
-        apy_values, balance_dates, balances, yearly_contrib, years = self.extract_history(run)
-        balances_axes.set_title(f"{kind_of_performance} Performance (Seed={run.seed})")
-        balances_axes.plot(years, balances, color=self.colors[run.color_index], label=f"Seed {run.seed}")
-        balances_axes.plot(years, yearly_contrib, color='black', label=f"Transfers")
-        balances_axes.set_ylabel('Balance in K$')
-        balances_axes.yaxis.set_major_formatter(self.thousands_formatter)
-        balances_axes.legend()
-        apy_axes.bar(years, apy_values, color="green", alpha=0.5, label="APY")
-        apy_axes.bar(years, self.extract_inflation(run), color="black", alpha=0.5, label="Inflation")
-        apy_axes.set_ylabel('Annual Percentage Return')
-        apy_axes.legend()
+            color[(current_dominant_color + 1 + ping_pong) % 3] = (color[(current_dominant_color + 1 + ping_pong) % 3] + step_size)
+            if color[(current_dominant_color + 1 + ping_pong) % 3] > 0.99:
+                color[(current_dominant_color + 1 + ping_pong) % 3] = 1.0
+                ping_pong = (ping_pong + 1) % 2
+            steps_at_color[current_dominant_color] -= 1
+            if steps_at_color[current_dominant_color] == 0:
+                color = [0.0, 0.0, 0.0]
+                current_dominant_color = (current_dominant_color + 1) % 3
+                color[current_dominant_color] = 1.0
+                ping_pong = (ping_pong + 1) % 2
+
+            self.line_styles.append(line_styles[rotate_line_style])
+            rotate_line_style = (rotate_line_style + 1) % (len(line_styles))
+
 
     @staticmethod
     def millions_formatter(x, pos):
-        return f'{x / 1e6:.0f}M'  # Formats numbers in millions
+        return f'{x / 1e6:.1f}M'  # Formats numbers in millions
 
     @staticmethod
     def thousands_formatter(x, pos):
-        return f'{x / 1e3:.0f}K'
+        return f'{x / 1e3:.1f}K'
 
     @staticmethod
     def visualize_market_returns_distribution():
@@ -255,23 +303,29 @@ class WealthVisualizer:
         samples = t.rvs(df=degrees_of_freedom, loc=location, scale=scale, size=200)
 
         # Plotting the histogram of generated samples
-        # plt.hist(samples, bins=50, density=True, alpha=0.5, color='blue', edgecolor='black')
-        plt.hist(returns, bins=25, density=True, alpha=0.5, color='green', edgecolor='black')
+        fig, fig_axes = plt.subplots(1, 1)
+        axes = fig_axes
+        axes.hist(returns, bins=25, density=True, alpha=0.5, color='green', edgecolor='black')
 
         # Plotting the probability density function
         x = np.linspace(-100, 100, 1000)
-        plt.plot(x, t.pdf(x, df=degrees_of_freedom, loc=location, scale=scale), 'r-', lw=2, label='PDF T-dist')
-        plt.plot(x, norm.pdf(x, loc=location, scale=scale), 'black', lw=2, label='PDF Norm')
+        axes.plot(x, t.pdf(x, df=degrees_of_freedom, loc=location, scale=scale), 'r-', lw=2, label='PDF T-dist')
+        axes.plot(x, norm.pdf(x, loc=location, scale=scale), 'black', lw=2, label='PDF Norm')
 
-        plt.xlabel('Value')
-        plt.ylabel('Density')
-        plt.title('SP500 Returns against normal and t-distribution curves')
-        plt.legend()
+        axes.set_xlabel('Value')
+        axes.set_ylabel('Density')
+        axes.set_title('SP500 Returns against normal and t-distribution curves')
+        axes.legend()
+
+    @staticmethod
+    def create_windows():
         plt.show()
 
 
 if __name__ == '__main__':
     v = WealthVisualizer()
     s = RetirementScenario()
-    s.run_scenario(seeds=[26, 27, 28, 29, 2342, 242, 999, 24442, 341, 1001])
+    s.run_scenario(seeds=[26, 27, 28, 29, 2342, 242, 999, 24442, 341, 1001, 1, 2, 3])
     v.visualize_results(s.runs)
+    v.visualize_market_returns_distribution()
+    v.create_windows()
