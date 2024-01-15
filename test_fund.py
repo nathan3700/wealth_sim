@@ -62,6 +62,33 @@ class TestFunds(unittest.TestCase):
         self.fund.set_daily_rate(effective_daily_rate)
         self.assertEqual(5, self.fund.apy)
 
+    def test_set_apy_generator(self):
+        def fake_apy_gen():
+            while True:
+                yield 0.5
+                yield 0.6
+                yield 0.7
+
+        self.fund.advance_time(date(2000, 1, 1))
+        self.fund.set_apy_generator(fake_apy_gen())
+        self.assertEqual(0.0, self.fund.apy)
+        self.fund.advance_time(date(2002, 1, 1))
+        self.assertEqual(0.6, self.fund.apy)
+
+        fake_apy_iter = fake_apy_gen()
+
+        def fake_apy_callable():
+            return next(fake_apy_iter)
+        self.fund.set_apy_generator(fake_apy_callable)
+        self.fund.advance_time(date(2005, 1, 1))
+        self.assertEqual(0.7, self.fund.apy)
+
+        def fake_apy_callable_with_year(year: int):
+            return year / 1000
+        self.fund.set_apy_generator(fake_apy_callable_with_year)
+        self.fund.advance_time(date(2006, 1, 1))
+        self.assertEqual(2.006, self.fund.apy)
+
     def test_annual_percentage_yield(self):
         self.fund.advance_time(date(2000, 8, 7))
         self.fund.contribute(1000, date(2000, 8, 8))

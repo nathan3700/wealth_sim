@@ -11,6 +11,7 @@ class Fund:
     def __init__(self, inception_date: date, name="No Name Fund"):
         self.balance = 0.0
         self.apy = 0.0  # Annual Percentage Yield
+        self.apy_generator = None
         self.daily_rate = 0.0
         self.inflation_rate = 0
         self.verbose = True
@@ -104,6 +105,19 @@ class Fund:
                             FundTransactionType.CONTRIBUTION_SUMMARY,
                             desc="Sum of contributions over the year"))
         self.contributions_this_year = 0.0
+        self.apply_apy_generator(last_day_of_year.year+1)
+
+    def apply_apy_generator(self, year: int):
+        if hasattr(self.apy_generator, "__call__"):
+            try:  # If it can be called with a year, than do so
+                self.set_apy(self.apy_generator(year))
+            except TypeError:  # If it can be called without a year, then do that
+                self.set_apy(self.apy_generator())
+        elif hasattr(self.apy_generator, "__next__"):
+            try:  # If it is an iterator, get the next value
+                self.set_apy(next(self.apy_generator))
+            except StopIteration:
+                raise FundError(f"The apy iterator ran out of values on year = {year}")
 
     def get_current_date(self):
         return self.current_date
@@ -121,6 +135,9 @@ class Fund:
         if apy == -100:
             apy = -99.9999
         self.daily_rate = math.exp(math.log((apy / 100) + 1) / 365) - 1
+
+    def set_apy_generator(self, apy_generator: callable):
+        self.apy_generator = apy_generator
 
     def set_daily_rate(self, daily_rate):
         self.daily_rate = daily_rate
